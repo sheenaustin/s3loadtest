@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "s3loadtest"
+version = "3.0.0"
+description = "Modular S3 load testing framework with realistic workload patterns"
+requires-python = ">=3.9"
+dependencies = [
+    "boto3>=1.26",
+]
+
+[project.scripts]
+s3loadtest = "s3loadtest.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["s3loadtest*"]
