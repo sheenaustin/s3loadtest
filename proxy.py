@@ -13,10 +13,14 @@ Usage::
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import socket
+import stat
 import subprocess
 import time
+import urllib.request
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -27,6 +31,8 @@ from s3loadtest.config import (
     PROXY_MAX_PARALLEL_SSH,
     PROXY_STARTUP_TIMEOUT,
     REMOTE_CODE_DIR,
+    S3POOL_GITHUB_REPO,
+    S3POOL_INSTALL_DIR,
 )
 from s3loadtest.workers import get_workers
 
@@ -47,13 +53,61 @@ def _is_port_open(port: int) -> bool:
         return False
 
 
+def _download_s3pool() -> str | None:
+    """Download the s3pool binary from GitHub releases.
+
+    Fetches the latest release that has a binary asset, downloads
+    it to ~/.s3pool/s3pool, and marks it executable.
+
+    Returns:
+        Path to the downloaded binary, or None on failure.
+    """
+    api_url = f"https://api.github.com/repos/{S3POOL_GITHUB_REPO}/releases"
+    try:
+        req = urllib.request.Request(api_url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            releases = json.loads(resp.read())
+    except Exception:
+        return None
+
+    # Find the first release with a binary asset
+    download_url = None
+    tag = None
+    for release in releases:
+        for asset in release.get("assets", []):
+            if asset["name"] == "s3pool":
+                download_url = asset["browser_download_url"]
+                tag = release["tag_name"]
+                break
+        if download_url:
+            break
+
+    if not download_url:
+        return None
+
+    install_dir = S3POOL_INSTALL_DIR
+    install_dir.mkdir(parents=True, exist_ok=True)
+    binary_path = install_dir / "s3pool"
+
+    print(f"  Downloading s3pool {tag} from GitHub...")
+    try:
+        urllib.request.urlretrieve(download_url, str(binary_path))
+        binary_path.chmod(binary_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        print(f"  Installed to {binary_path}")
+        return str(binary_path)
+    except Exception:
+        return None
+
+
 def _find_local_binary() -> str | None:
     """Find s3pool binary on the local machine.
 
     Search order:
         1. ``S3POOL_BINARY`` env var (if the path exists locally)
         2. ``s3pool`` on PATH
-        3. Common local build paths
+        3. Previously downloaded binary in s3loadtest dir
+        4. Common local build paths
+        5. Download from GitHub releases
     """
     if Path(PROXY_BINARY_PATH).is_file():
         return PROXY_BINARY_PATH
@@ -61,6 +115,10 @@ def _find_local_binary() -> str | None:
     on_path = shutil.which("s3pool")
     if on_path:
         return on_path
+
+    installed = S3POOL_INSTALL_DIR / "s3pool"
+    if installed.is_file():
+        return str(installed)
 
     for candidate in (
         Path("/exp/local/s3pool/target/release/s3pool"),
@@ -70,7 +128,7 @@ def _find_local_binary() -> str | None:
         if candidate.is_file():
             return str(candidate)
 
-    return None
+    return _download_s3pool()
 
 
 def _find_local_env_dir() -> str | None:

@@ -89,7 +89,7 @@ S3_REGION = os.environ.get("AWS_REGION", "us-east-1")
 # ---------------------------------------------------------------------------
 # S3 Client Backend
 # ---------------------------------------------------------------------------
-S3_BACKEND = os.environ.get("S3LOADTEST_BACKEND", "boto3")
+S3_BACKEND = os.environ.get("S3LOADTEST_BACKEND", "proxy")
 
 # ---------------------------------------------------------------------------
 # Path Configuration
@@ -188,3 +188,7 @@ PROXY_PORT = PROXY_LISTEN_ADDR.split(":")[-1]
 PROXY_LOG_FILE = "/tmp/s3pool-proxy.log"
 PROXY_STARTUP_TIMEOUT = 15
 PROXY_MAX_PARALLEL_SSH = 15
+S3POOL_GITHUB_REPO = "sheenaustin/s3pool"
+S3POOL_INSTALL_DIR = Path(
+    os.environ.get("S3POOL_INSTALL_DIR", str(Path(__file__).resolve().parent))
+)

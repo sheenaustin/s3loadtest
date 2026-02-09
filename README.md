@@ -84,7 +84,7 @@ S3_BUCKET=your-bucket
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `S3LOADTEST_BACKEND` | `boto3` | S3 client: `boto3`, `proxy` (s3pool), `minio` |
+| `S3LOADTEST_BACKEND` | `proxy` | S3 client: `proxy` (s3pool), `boto3`, `minio` |
 | `S3LOADTEST_DATA_DIR` | `./data` | Pre-generated data files |
 | `S3LOADTEST_KEY_DIR` | `/tmp` | Object key tracking files |
 | `S3LOADTEST_WORKERS_FILE` | `./workers` | SSH worker hostnames (one per line) |
@@ -102,11 +102,11 @@ S3_BUCKET=your-bucket
 
 | Backend | Set `S3LOADTEST_BACKEND` to | Description |
 |---------|----------------------------|-------------|
+| **s3pool** (default) | `proxy` | Routes through [s3pool](https://github.com/sheenaustin/s3pool) Rust proxy — auto-downloaded if not found |
 | **boto3** | `boto3` | AWS SDK with automatic endpoint rotation across all backends |
-| **s3pool** | `proxy` | Routes through s3pool Rust proxy for connection pooling |
 | **minio** | `minio` | MinIO Python SDK |
 
-The boto3 backend rotates across all endpoints per operation — no single-endpoint bottleneck.
+The default `proxy` backend uses s3pool for TLS, SigV4 signing, and connection pooling. If the s3pool binary isn't found locally, it's downloaded automatically from GitHub releases.
 
 ## Stats Output
 

@@ -34,6 +34,9 @@ htmlcov/
 # Project-local config
 CLAUDE.md
 
+# Binaries
+s3pool
+
 # Data files
 data/
 logs/

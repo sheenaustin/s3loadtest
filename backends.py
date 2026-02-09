@@ -453,34 +453,23 @@ class _RustProxyManager:
     def _find_binary() -> str:
         """Locate the s3pool binary.
 
-        Search order:
-            1. ``S3POOL_BINARY`` environment variable
-            2. ``s3pool`` on ``PATH`` via ``shutil.which``
-            3. Common local build paths
+        Delegates to :func:`s3loadtest.proxy._find_local_binary`
+        which searches env, PATH, common paths, and downloads
+        from GitHub as a last resort.
 
         Raises:
             FileNotFoundError: If the binary cannot be found.
         """
-        custom = os.environ.get("S3POOL_BINARY")
-        if custom and Path(custom).is_file():
-            return custom
+        from s3loadtest.proxy import _find_local_binary
 
-        on_path = shutil.which("s3pool")
-        if on_path:
-            return on_path
-
-        # Search common local build paths
-        for candidate in (
-            Path("/exp/local/s3pool/target/release/s3pool"),
-            Path("/exp/local/s3pool-v2/target/release/s3pool"),
-            Path.home() / "s3pool" / "target" / "release" / "s3pool",
-        ):
-            if candidate.is_file():
-                return str(candidate)
+        binary = _find_local_binary()
+        if binary:
+            return binary
 
         raise FileNotFoundError(
             "s3pool binary not found. Set the S3POOL_BINARY "
-            "environment variable or ensure 's3pool' is on PATH."
+            "environment variable, ensure 's3pool' is on PATH, "
+            "or check your internet connection for GitHub download."
         )
 
     @staticmethod
