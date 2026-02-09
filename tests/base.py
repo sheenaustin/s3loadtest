@@ -10,6 +10,7 @@ All load test classes inherit from LoadTest which provides:
 """
 
 import time
+from collections import defaultdict
 from threading import Event, Lock
 
 from s3loadtest.config import MAX_OBJECTS_PER_WORKER
@@ -29,6 +30,7 @@ class LoadTest:
         stop_event: Event,
         duration_seconds: float | None = None,
         concurrency: int | None = None,
+        size: str | None = None,
     ) -> None:
         """Initialize load test.
 
@@ -38,15 +40,21 @@ class LoadTest:
             stop_event: Threading Event to signal stop
             duration_seconds: Optional test duration
             concurrency: Number of worker threads (default: auto-calculated)
+            size: Optional size filter (e.g. '100MB'). Used by heavyread.
         """
         self.name = name
         self.worker_id = worker_id
         self.stop_event = stop_event
         self.duration_seconds = duration_seconds
+        self.size = size
         self.stats = {"ops": 0, "errors": 0, "bytes": 0, "deletes": 0, "worker_failures": 0}
         self.stats_lock = Lock()
         self.max_objects_per_worker = MAX_OBJECTS_PER_WORKER
         self.start_time = time.time()
+
+        # Latency tracking — keyed by op type (GET, PUT, DELETE, LIST, HEAD)
+        self._latencies: dict[str, list[float]] = defaultdict(list)
+        self._latency_lock = Lock()
 
         self.logger = get_logger(test_name=name, worker_id=worker_id)
 
@@ -65,6 +73,42 @@ class LoadTest:
         with self.stats_lock:
             for key, value in kwargs.items():
                 self.stats[key] = self.stats.get(key, 0) + value
+
+    def record_latency(self, op_type: str, duration_ms: float) -> None:
+        """Record a latency measurement (thread-safe)."""
+        with self._latency_lock:
+            self._latencies[op_type].append(duration_ms)
+
+    def get_latency_percentiles(self) -> dict[str, dict[str, float]]:
+        """Get p50/p95/p99/max latency per op type.
+
+        Returns:
+            Dict like ``{"GET": {"p50": 2.1, "p95": 15.3, ...}, ...}``.
+        """
+        with self._latency_lock:
+            snapshot = {
+                op: sorted(vals)
+                for op, vals in self._latencies.items()
+                if vals
+            }
+        result: dict[str, dict[str, float]] = {}
+        for op, vals in snapshot.items():
+            n = len(vals)
+            result[op] = {
+                "p50": vals[int(n * 0.50)] if n else 0,
+                "p95": vals[int(min(n * 0.95, n - 1))] if n else 0,
+                "p99": vals[int(min(n * 0.99, n - 1))] if n else 0,
+                "max": vals[-1] if n else 0,
+                "count": n,
+            }
+        return result
+
+    def drain_latencies(self) -> dict[str, dict[str, float]]:
+        """Get percentiles and reset. Prevents unbounded memory growth."""
+        result = self.get_latency_percentiles()
+        with self._latency_lock:
+            self._latencies.clear()
+        return result
 
     def should_continue(self) -> bool:
         """Check if test should continue running."""
