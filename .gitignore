@@ -36,6 +36,8 @@ CLAUDE.md
 
 # Binaries
 s3pool
+uv
+uv.lock
 
 # Data files
 data/
