@@ -20,6 +20,21 @@ from s3loadtest.utils import (
 )
 
 
+def _format_latency_line(percentiles: dict[str, dict[str, float]]) -> str:
+    """Format latency percentiles into a compact log line."""
+    parts: list[str] = []
+    for op in ("GET", "PUT", "DELETE", "LIST", "HEAD"):
+        if op not in percentiles:
+            continue
+        p = percentiles[op]
+        parts.append(
+            f"{op} p50={p['p50']:.0f}ms "
+            f"p95={p['p95']:.0f}ms "
+            f"p99={p['p99']:.0f}ms"
+        )
+    return " | ".join(parts) if parts else ""
+
+
 def cmd_run(args: object) -> int:
     """Run a test locally (called by SSH from coordinator or directly).
 
@@ -61,9 +76,17 @@ def cmd_run(args: object) -> int:
             duration_seconds = parse_duration(raw_duration)
 
     stats_interval = getattr(args, "stats_interval", 30)
+    concurrency = getattr(args, "concurrency", None)
+    size = getattr(args, "size", None)
 
     test = test_class(
-        test_name, worker_id, stop_event, duration_seconds
+        test_name, worker_id, stop_event, duration_seconds,
+        concurrency=concurrency, size=size,
+    )
+
+    logger.info(
+        f"Thread count: {test.concurrency} "
+        f"(override with --concurrency N)"
     )
 
     stats_stop = Event()
@@ -82,16 +105,25 @@ def cmd_run(args: object) -> int:
                 bytes_sec = (
                     stats["bytes"] / elapsed if elapsed > 0 else 0
                 )
-                logger.info(
+
+                # Drain latencies for this interval
+                lat_line = _format_latency_line(
+                    test.drain_latencies()
+                )
+
+                msg = (
                     f"STATS: ops={stats['ops']:,} "
                     f"({ops_sec:.1f}/s), "
                     f"bytes={format_bytes(stats['bytes'])} "
                     f"({format_bytes(bytes_sec)}/s), "
                     f"errors={stats['errors']}, "
                     f"elapsed="
-                    f"{format_duration(int(elapsed))}",
-                    extra={"op_type": "STATS"},
+                    f"{format_duration(int(elapsed))}"
                 )
+                if lat_line:
+                    msg += f" | {lat_line}"
+
+                logger.info(msg, extra={"op_type": "STATS"})
 
         stats_thread = Thread(target=stats_reporter, daemon=True)
         stats_thread.start()
@@ -107,13 +139,21 @@ def cmd_run(args: object) -> int:
             stats = test.stats.copy()
         elapsed = time.time() - test.start_time
         ops_sec = stats["ops"] / elapsed if elapsed > 0 else 0
-        logger.info(
+
+        # Final latency summary
+        final_lat = test.get_latency_percentiles()
+        lat_line = _format_latency_line(final_lat)
+
+        msg = (
             f"FINAL: ops={stats['ops']:,} ({ops_sec:.1f}/s), "
             f"bytes={format_bytes(stats['bytes'])}, "
             f"errors={stats['errors']}, "
             f"worker_failures={stats['worker_failures']}, "
-            f"elapsed={format_duration(int(elapsed))}",
-            extra={"op_type": "FINAL"},
+            f"elapsed={format_duration(int(elapsed))}"
         )
+        if lat_line:
+            msg += f"\n  Latency: {lat_line}"
+
+        logger.info(msg, extra={"op_type": "FINAL"})
 
     return 0

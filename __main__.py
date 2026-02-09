@@ -24,7 +24,8 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Available tests:
-  all, baseload, checkpoint, heavyread, delete, elephant, listops, spiky
+  all, baseload, checkpoint, heavyread, delete, elephant, firehose,
+  listops, metastorm, spiky
 
 Commands:
   init-data   Initialize pre-generated data files (run once)
@@ -67,7 +68,7 @@ Examples:
         nargs="?",
         help=(
             "Test name: all, baseload, checkpoint, heavyread, "
-            "delete, elephant, listops, spiky"
+            "delete, elephant, firehose, listops, metastorm, spiky"
         ),
     )
     parser.add_argument(
@@ -118,6 +119,19 @@ Examples:
         type=int,
         default=30,
         help="Stats logging interval in seconds",
+    )
+
+    parser.add_argument(
+        "--size",
+        type=str,
+        default=None,
+        help="Filter to specific size label (e.g. 1KB, 10MB, 100MB). Used by heavyread.",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help="Override thread count (default: auto-detected from CPU count)",
     )
 
     # Legacy backward compat for SSH workers
