@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import atexit
 import http.client
+import itertools
 import os
 import random
 import shutil
@@ -40,11 +41,14 @@ _VERIFY_SSL = os.environ.get("S3_VERIFY_SSL", "false").lower() in (
 
 
 class S3ClientBoto3:
-    """Pure boto3 S3 client.
+    """Pure boto3 S3 client with endpoint rotation.
 
-    Uses only boto3 for all operations. Good for environments where
-    s3pool isn't available, debugging, and compatibility testing.
+    Rotates across all S3 endpoints per operation to avoid
+    MinIO per-connection throttling. Clients are cached per
+    endpoint to reuse sessions while still distributing load.
     """
+
+    _counter = itertools.count()
 
     def __init__(
         self,
@@ -57,31 +61,24 @@ class S3ClientBoto3:
         delay: float = 0,
         bandwidth_bps: int = 0,
     ) -> None:
-        """Initialize boto3 S3 client.
-
-        Args:
-            bucket: S3 bucket name.
-            endpoints: List of S3 endpoint URLs.
-            access_key_id: AWS access key ID.
-            secret_access_key: AWS secret access key.
-            region: AWS region.
-            delay: Artificial delay in seconds per operation.
-            bandwidth_bps: Bandwidth limit in bytes/sec (unused).
-        """
         self.bucket = bucket
         self.endpoints = endpoints
         self.access_key_id = access_key_id
         self.secret_access_key = secret_access_key
         self.region = region
         self.delay = delay
-        self._client: Any = None
+        self._clients: dict[str, Any] = {}
 
     def _get_client(self) -> Any:
-        """Get boto3 client (lazy-loaded)."""
-        if self._client is None:
-            self._client = boto3.client(
+        """Get boto3 client, rotating across endpoints."""
+        if not self.endpoints:
+            raise RuntimeError("No S3 endpoints configured")
+        idx = next(S3ClientBoto3._counter) % len(self.endpoints)
+        endpoint = self.endpoints[idx]
+        if endpoint not in self._clients:
+            self._clients[endpoint] = boto3.client(
                 "s3",
-                endpoint_url=random.choice(self.endpoints),
+                endpoint_url=endpoint,
                 aws_access_key_id=self.access_key_id,
                 aws_secret_access_key=self.secret_access_key,
                 verify=_VERIFY_SSL,
@@ -91,7 +88,7 @@ class S3ClientBoto3:
                     read_timeout=300,
                 ),
             )
-        return self._client
+        return self._clients[endpoint]
 
     def put_object(self, key: str, data: bytes) -> dict:
         """Upload object."""
@@ -459,6 +456,7 @@ class _RustProxyManager:
         Search order:
             1. ``S3POOL_BINARY`` environment variable
             2. ``s3pool`` on ``PATH`` via ``shutil.which``
+            3. Common local build paths
 
         Raises:
             FileNotFoundError: If the binary cannot be found.
@@ -470,6 +468,15 @@ class _RustProxyManager:
         on_path = shutil.which("s3pool")
         if on_path:
             return on_path
+
+        # Search common local build paths
+        for candidate in (
+            Path("/exp/local/s3pool/target/release/s3pool"),
+            Path("/exp/local/s3pool-v2/target/release/s3pool"),
+            Path.home() / "s3pool" / "target" / "release" / "s3pool",
+        ):
+            if candidate.is_file():
+                return str(candidate)
 
         raise FileNotFoundError(
             "s3pool binary not found. Set the S3POOL_BINARY "
@@ -621,6 +628,35 @@ class S3ClientRustProxy:
                 f"{body[:200]}"
             )
         return body
+
+    def get_object_drain(self, path: str) -> int:
+        """Download an object, discard body, return byte count.
+
+        Uses Content-Length header (already parsed by http.client) to
+        avoid per-chunk ``len()`` + accumulation. Drains in 1MB chunks
+        to minimize Python ``read()`` calls for large objects.
+
+        Args:
+            path: Full URL path (e.g. ``/bucket/key``).
+
+        Returns:
+            Total bytes read.
+        """
+        conn = self._get_conn()
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        if resp.status != 200:
+            body = resp.read()
+            raise RuntimeError(
+                f"GET {path} failed: HTTP {resp.status} - "
+                f"{body[:200]}"
+            )
+        # Grab Content-Length before draining (resp.length is set by http.client)
+        nbytes = resp.length or 0
+        # Drain body to free connection — 1MB chunks = fewer read() calls
+        while resp.read(1048576):
+            pass
+        return nbytes
 
     def delete_object(self, key: str) -> None:
         """Delete a single object via the Rust proxy."""
