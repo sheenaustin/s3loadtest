@@ -30,10 +30,10 @@ class CheckpointLoadTest(LoadTest):
                 # Write large objects
                 size, size_name = random_object_size(CHECKPOINT_SIZES)
                 random_suffix = generate_random_suffix()
-                key = f"loadtest/{self.worker_id}/other/{int(time.time()*1000000)}/{random_suffix}"
+                key = f"loadtest/{self.worker_id}/{size_name}/{self.name}/{int(time.time()*1000000)}/{random_suffix}"
                 data = read_test_data(size)
                 s3_put(client, key, data, self.logger)
-                append_object_key(self.name, self.worker_id, key)
+                append_object_key(self.name, self.worker_id, key, size_label=size_name)
                 self.update_stats(ops=1, bytes=size)
 
                 # Manage object list - trim file if too many keys

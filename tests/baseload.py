@@ -29,12 +29,12 @@ class BaseLoadTest(LoadTest):
             if random.random() < 0.3:  # 30% write
                 size, size_name = random_object_size(ALL_SIZES)
                 random_suffix = generate_random_suffix()
-                key = f"loadtest/{self.worker_id}/other/{int(time.time()*1000000)}/{random_suffix}"
+                key = f"loadtest/{self.worker_id}/{size_name}/{self.name}/{int(time.time()*1000000)}/{random_suffix}"
 
                 data = read_test_data(size)
                 s3_put(client, key, data, self.logger)
 
-                append_object_key(self.name, self.worker_id, key)
+                append_object_key(self.name, self.worker_id, key, size_label=size_name)
                 self.update_stats(ops=1, bytes=size)
                 self.manage_object_list_file(client)
 
@@ -47,8 +47,6 @@ class BaseLoadTest(LoadTest):
                     except Exception as e:
                         if not is_not_found_error(e):
                             raise
-
-            time.sleep(0.25)  # Rate limiting
 
         except Exception as e:
             self.update_stats(errors=1)

@@ -10,7 +10,12 @@ from __future__ import annotations
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from s3loadtest.config import S3_BUCKET
+from s3loadtest.config import (
+    DELETE_BATCH_SIZE,
+    DELETE_CYCLE_INTERVAL,
+    DELETE_WORKERS,
+    S3_BUCKET,
+)
 from s3loadtest.keyfiles import KeyFileManager
 from s3loadtest.s3_client import S3Client
 from s3loadtest.tests.base import LoadTest
@@ -27,8 +32,8 @@ class DeleteLoadTest(LoadTest):
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self.pool = S3Client()
-        self.batch_size = 100
-        self.delete_workers = 1
+        self.batch_size = DELETE_BATCH_SIZE
+        self.delete_workers = DELETE_WORKERS
 
     def list_objects_batch(
         self,
@@ -196,7 +201,7 @@ class DeleteLoadTest(LoadTest):
             )
 
         worker_prefix = f"loadtest/{self.worker_id}/"
-        cycle_interval = 180
+        cycle_interval = DELETE_CYCLE_INTERVAL
 
         cycle_count = 0
         while self.should_continue():
