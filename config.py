@@ -115,18 +115,25 @@ REMOTE_CODE_DIR = os.environ.get("S3LOADTEST_REMOTE_CODE_DIR", "")
 REMOTE_LOG_DIR = os.environ.get("S3LOADTEST_REMOTE_LOG_DIR", "")
 
 # ---------------------------------------------------------------------------
-# Thread Allocation — Based on Target System Load
+# Thread Allocation — Maximized for I/O-bound S3 workloads
 # ---------------------------------------------------------------------------
-CPU_ALLOCATION_PERCENTAGE = 0.90
+CPU_ALLOCATION_PERCENTAGE = 1.0
+
+# S3 operations are 99% I/O wait. We can run 8x the CPU count in threads
+# before Python overhead becomes the bottleneck. On a 64-core machine this
+# gives 512 threads — each one blocked on network I/O most of the time.
+IO_THREAD_MULTIPLIER = 8
 
 TEST_TARGET_LOAD: dict[str, float] = {
-    "baseload": 0.75,
-    "checkpoint": 1.00,
-    "heavyread": 1.00,
-    "delete": 0.25,
-    "elephant": 0.25,
-    "listops": 0.25,
-    "spiky": 1.00,
+    "baseload": 1.0,
+    "checkpoint": 1.0,
+    "heavyread": 1.0,
+    "delete": 1.0,
+    "elephant": 1.0,
+    "listops": 1.0,
+    "spiky": 1.0,
+    "firehose": 1.0,
+    "metastorm": 1.0,
 }
 
 # ---------------------------------------------------------------------------
@@ -154,7 +161,16 @@ CHECKPOINT_SIZES: list[str] = ["10MB", "100MB"]
 # ---------------------------------------------------------------------------
 # Test Behavior Configuration
 # ---------------------------------------------------------------------------
-MAX_OBJECTS_PER_WORKER = 500
+MAX_OBJECTS_PER_WORKER = 5000
+
+# Delete test configuration
+DELETE_BATCH_SIZE = 1000  # S3 API max per batch
+DELETE_WORKERS = 32
+DELETE_CYCLE_INTERVAL = 30  # seconds between delete cycles
+
+# Elephant flow — connection exhaustion
+ELEPHANT_CONNECTIONS = 1000  # concurrent slow connections to hold open
+ELEPHANT_TRICKLE_BPS = 100  # bytes per second per connection
 
 # Retry configuration
 RETRY_MAX_ATTEMPTS = 5

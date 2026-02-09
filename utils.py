@@ -17,6 +17,7 @@ from botocore.exceptions import ClientError
 from s3loadtest.config import (
     CPU_ALLOCATION_PERCENTAGE,
     DATA_DIR,
+    IO_THREAD_MULTIPLIER,
     RETRY_BASE_DELAY,
     RETRY_MAX_ATTEMPTS,
     RETRY_MAX_DELAY,
@@ -165,6 +166,10 @@ def retry_with_backoff(
 def calculate_threads_for_test(test_name: str) -> int:
     """Calculate thread count for a test based on CPU count.
 
+    S3 operations are I/O-bound (99%+ time spent waiting on network).
+    We use IO_THREAD_MULTIPLIER (default 8x) to saturate the network
+    rather than the CPU. On a 64-core machine this gives 512 threads.
+
     Args:
         test_name: Name of the test.
 
@@ -172,9 +177,12 @@ def calculate_threads_for_test(test_name: str) -> int:
         Number of threads to use.
     """
     cpu_count = multiprocessing.cpu_count()
-    target_load = TEST_TARGET_LOAD.get(test_name, 0.25)
+    target_load = TEST_TARGET_LOAD.get(test_name, 1.0)
     threads = int(
-        cpu_count * CPU_ALLOCATION_PERCENTAGE * target_load
+        cpu_count
+        * CPU_ALLOCATION_PERCENTAGE
+        * IO_THREAD_MULTIPLIER
+        * target_load
     )
     return max(1, threads)
 
