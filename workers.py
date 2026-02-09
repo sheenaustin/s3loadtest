@@ -69,7 +69,7 @@ def _build_remote_command(
     if REMOTE_CODE_DIR:
         return (
             f"cd {REMOTE_CODE_DIR} && "
-            f"python3 -m s3loadtest run {test_name} "
+            f"./uv run python -m s3loadtest run {test_name} "
             f"--worker-id {worker_id} {args_str} "
             f"</dev/null >{log_file} 2>&1 &"
         )
@@ -143,7 +143,7 @@ def start_worker_process(
     )
 
     start_cmd = [
-        "ssh", "-f",
+        "ssh", "-f", "-n",
         "-o", "StrictHostKeyChecking=no",
         "-o", "ConnectTimeout=5",
         hostname,
@@ -152,7 +152,11 @@ def start_worker_process(
 
     try:
         subprocess.run(
-            start_cmd, capture_output=True, text=True, timeout=30,
+            start_cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
         )
         return hostname, "started"
     except subprocess.TimeoutExpired:
