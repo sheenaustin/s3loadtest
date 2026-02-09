@@ -1,199 +1,172 @@
 # s3loadtest
 
-A modular S3 load testing framework that generates realistic, production-like workloads against any S3-compatible storage. Seven distinct test patterns simulate everything from steady-state CRUD to bursty checkpoint saves to slow WAN clients — run them individually or all at once across a fleet of workers.
+Stress-test any S3-compatible object store to its breaking point. Nine test patterns target different failure modes: throughput saturation, metadata server overload, connection exhaustion, bursty checkpoint storms, and aggressive batch deletes.
 
-## Why s3loadtest?
-
-Most S3 benchmarks measure peak throughput under ideal conditions. Real storage clusters face mixed workloads: continuous background I/O, periodic checkpoint bursts, slow clients holding connections open, and aggressive batch deletes. s3loadtest reproduces these patterns so you can test how your storage actually behaves under realistic pressure.
+By default, s3loadtest automatically detects your machine's resources and uses **everything** — 512+ concurrent threads on a 64-core box, endpoint rotation across all backends, zero rate limiting. You don't configure it to be aggressive. It already is.
 
 ## Quick Start
 
-### 1. Install
-
 ```bash
-pip install .
-```
+# Install
+uv sync
 
-Or install directly from the repo:
-
-```bash
-pip install git+https://github.com/sheenaustin/s3loadtest.git
-```
-
-### 2. Configure
-
-Copy the example config and fill in your S3 credentials:
-
-```bash
+# Configure (edit .env with your S3 endpoints + credentials)
 cp .env.example .env
+
+# Generate test data (1KB to 100MB, uncompressible)
+uv run s3loadtest init-data
+
+# Run a test
+uv run s3loadtest run firehose --duration 5m
 ```
-
-Edit `.env` with your values:
-
-```ini
-S3_ENDPOINTS=https://your-s3-endpoint:9000
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
-S3_BUCKET=your-bucket-name
-```
-
-### 3. Initialize test data
-
-Pre-generate uncompressible data files (1KB to 100MB) used by the tests:
-
-```bash
-s3loadtest init-data
-```
-
-### 4. Run a test
-
-```bash
-# Run baseload locally for 5 minutes
-s3loadtest run baseload --duration 5m
-
-# Run with debug logging
-s3loadtest run baseload --duration 5m --log-level DEBUG
-```
-
-That's it. You're load testing.
 
 ## Test Patterns
 
-| Test | Behavior | Read/Write | Schedule |
-|------|----------|-----------|----------|
-| **baseload** | Continuous mixed I/O | 70% read, 30% write | 24/7 |
-| **checkpoint** | Large write bursts | 10% read, 90% write | 10m burst, 1h gap |
-| **heavyread** | Read-only storm | 100% read | 20m burst, 40m gap |
-| **spiky** | Baseload with random extreme bursts | Variable | 1-3 bursts per 5m window |
-| **elephant** | Simulated slow WAN clients (1 Mbps) | 50/50 | 24/7 |
-| **delete** | Streaming batch delete | Delete only | Every 3m |
-| **listops** | Continuous paginated listing | List only | 24/7 |
+Each test destroys something different.
 
-Run all tests simultaneously:
+| Test | What it does | What it kills |
+|------|-------------|---------------|
+| **firehose** | 50/50 read/write, all sizes, zero sleep, max threads | Raw throughput ceiling |
+| **metastorm** | Rapid 1-byte PUT/HEAD/DELETE/LIST cycles | Metadata server / IOPS |
+| **elephant** | 1000+ slow-trickle connections at 100 bytes/sec | Connection pools / FD limits |
+| **baseload** | 70% read, 30% write, continuous | Sustained mixed I/O |
+| **checkpoint** | 90% write bursts of 10MB/100MB objects, 10m on, 1h off | Write throughput / journaling |
+| **heavyread** | 100% read storm, equal size cycling, 20m bursts | Read cache / bandwidth |
+| **spiky** | Baseload + random 1-minute extreme bursts | Burst handling / queueing |
+| **delete** | Streaming batch delete (1000/batch, 32 workers) | Delete throughput / GC |
+| **listops** | Continuous paginated listing | List/metadata scalability |
 
-```bash
-s3loadtest run all --duration 1h
-```
-
-## Distributed Mode
-
-Scale across multiple machines using SSH-based worker orchestration.
-
-### Setup workers
-
-Create a `workers` file with one hostname per line:
-
-```
-worker-1
-worker-2
-worker-3
-```
-
-Make sure s3loadtest is installed on each worker and SSH access is configured.
-
-### Launch across the fleet
+Run all of them at once:
 
 ```bash
-# Start baseload on all workers for 1 hour
-s3loadtest start baseload --duration 1h
-
-# Start all tests on 10 workers
-s3loadtest start all --duration 2h --workers 10
-
-# Check what's running
-s3loadtest status
-
-# Stop everything
-s3loadtest stop all
+uv run s3loadtest run all --duration 1h
 ```
 
-### Cleanup
-
-Remove all test objects from S3 when you're done:
+## Usage
 
 ```bash
-s3loadtest cleanup
-s3loadtest cleanup --prefix loadtest/
+# Run locally
+uv run s3loadtest run <test> --duration <dur>
+uv run s3loadtest run firehose --duration 1h
+uv run s3loadtest run metastorm --duration 30m --concurrency 200
+
+# Override thread count (default: auto-detected, typically 512 on 64-core)
+uv run s3loadtest run firehose --duration 5m --concurrency 1000
+
+# Distributed mode (SSH workers)
+uv run s3loadtest start all --duration 2h --workers 10
+uv run s3loadtest status
+uv run s3loadtest stop all
+
+# Cleanup
+uv run s3loadtest cleanup --prefix loadtest/
+
+# Generate test data
+uv run s3loadtest init-data
 ```
+
+Duration format: `5m`, `1h`, `2d`, `1w`.
+
+## Configuration
+
+All via environment variables or `.env` file.
+
+**Required:**
+
+```ini
+S3_ENDPOINTS=https://node1:9000,https://node2:9000,https://node3:9000
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+S3_BUCKET=your-bucket
+```
+
+**Optional:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `S3LOADTEST_BACKEND` | `boto3` | S3 client: `boto3`, `proxy` (s3pool), `minio` |
+| `S3LOADTEST_DATA_DIR` | `./data` | Pre-generated data files |
+| `S3LOADTEST_KEY_DIR` | `/tmp` | Object key tracking files |
+| `S3LOADTEST_WORKERS_FILE` | `./workers` | SSH worker hostnames (one per line) |
+| `S3_VERIFY_SSL` | `false` | SSL certificate verification |
+
+**Distributed mode:**
+
+| Variable | Description |
+|----------|-------------|
+| `S3LOADTEST_REMOTE_CODE_DIR` | Path to s3loadtest on workers |
+| `S3LOADTEST_REMOTE_LOG_DIR` | Log directory on workers |
+| `S3POOL_BINARY` | Path to s3pool binary (for proxy backend) |
 
 ## S3 Backends
 
-s3loadtest supports three S3 client backends. Set `S3LOADTEST_BACKEND` in your `.env`:
+| Backend | Set `S3LOADTEST_BACKEND` to | Description |
+|---------|----------------------------|-------------|
+| **boto3** | `boto3` | AWS SDK with automatic endpoint rotation across all backends |
+| **s3pool** | `proxy` | Routes through s3pool Rust proxy for connection pooling |
+| **minio** | `minio` | MinIO Python SDK |
 
-| Backend | Value | Description |
-|---------|-------|-------------|
-| **boto3** | `boto3` (default) | Standard AWS SDK. Works with any S3-compatible storage. |
-| **s3pool** | `proxy` | Routes through [s3pool](https://github.com/sheenaustin/s3pool) proxy for endpoint rotation and connection pooling. |
-| **minio** | `minio` | Uses the MinIO Python SDK. |
+The boto3 backend rotates across all endpoints per operation — no single-endpoint bottleneck.
 
-## Configuration Reference
+## Stats Output
 
-All configuration is via environment variables or a `.env` file. See [.env.example](.env.example) for the full list.
-
-**Required:**
-- `S3_ENDPOINTS` — S3 endpoint URLs (comma-separated)
-- `AWS_ACCESS_KEY_ID` — Access key
-- `AWS_SECRET_ACCESS_KEY` — Secret key
-- `S3_BUCKET` — Bucket name
-
-**Optional:**
-- `S3LOADTEST_BACKEND` — Client backend: `boto3`, `proxy`, `minio` (default: `boto3`)
-- `S3LOADTEST_DATA_DIR` — Pre-generated data directory (default: `./data`)
-- `S3LOADTEST_LOG_DIR` — Log output directory (default: `./logs`)
-- `S3LOADTEST_WORKERS_FILE` — Workers file path (default: `./workers`)
-- `S3_VERIFY_SSL` — SSL verification (default: `false`)
-
-## CLI Reference
+s3loadtest reports periodic stats with latency percentiles:
 
 ```
-s3loadtest init-data                          # Generate test data files
-s3loadtest run <test> --duration <dur>        # Run a test locally
-s3loadtest start <test> --duration <dur>      # Launch on workers via SSH
-s3loadtest status                             # Show running tests
-s3loadtest stop <test|all>                    # Stop tests on workers
-s3loadtest cleanup [--prefix <prefix>]        # Delete test objects from S3
+STATS: ops=42,691 (1,423/s), bytes=2.1GB (71.2MB/s), errors=0, elapsed=30s | GET p50=3ms p95=18ms p99=42ms | PUT p50=8ms p95=35ms p99=89ms
 ```
 
-Duration format: `5m` (minutes), `1h` (hours), `2d` (days), `1w` (weeks).
+Final summary includes full latency breakdown:
+
+```
+FINAL: ops=284,512 (1,410/s), bytes=14.2GB, errors=3, elapsed=3m
+  Latency: GET p50=3ms p95=19ms p99=45ms | PUT p50=9ms p95=37ms p99=91ms
+```
+
+## Object Key Layout
+
+```
+loadtest/{worker_id}/{size_label}/{test_name}/{timestamp}/{suffix}
+```
+
+Keys are tracked in per-size files for efficient size-targeted reads by heavyread.
 
 ## Architecture
 
 ```
 s3loadtest/
   __main__.py       CLI entry point
-  config.py         Environment-based configuration
-  s3_client.py      S3 client factory (backend selection)
-  backends.py       S3 client implementations (boto3, s3pool, minio)
+  config.py         All tunables (maximized by default)
+  s3_client.py      S3 client factory
+  backends.py       boto3 (endpoint rotation), s3pool proxy, minio
   s3_ops.py         Retry-wrapped S3 operations
-  workers.py        SSH-based worker management
-  proxy.py          s3pool proxy management on workers
-  utils.py          Retry logic, data generation, formatting
-  keyfiles.py       Thread-safe object key tracking (fcntl locking)
-  logging_setup.py  Structured logging with JSON support
+  keyfiles.py       Thread-safe per-size key tracking (fcntl)
+  utils.py          Retry logic, data generation, thread calculation
+  logging_setup.py  Structured logging with latency percentiles
+  workers.py        SSH worker orchestration
+  proxy.py          s3pool proxy lifecycle management
   tests/
-    base.py         Base class with stats, signals, threading
-    baseload.py     Continuous 70/30 read/write
+    base.py         Base class: stats, latency tracking, signals
+    firehose.py     Max throughput mixed workload
+    metastorm.py    Metadata bombardment
+    elephant.py     Connection exhaustion (slow trickle)
+    baseload.py     Continuous 70/30 mixed I/O
     checkpoint.py   Bursty large writes
-    heavyread.py    Read-only storms
+    heavyread.py    Read storms with equal size cycling
     spiky.py        Baseload + random extreme bursts
-    elephant.py     Simulated slow WAN clients
-    delete.py       Streaming batch delete
+    delete.py       Streaming batch delete (1000/batch, 32 workers)
     listops.py      Continuous paginated listing
   cli/
-    run.py          Local test execution
-    start.py        Distributed test launch
+    run.py          Local execution with latency reporting
+    start.py        Distributed launch
     stop.py         Process termination
     status.py       Running test discovery
     cleanup.py      S3 object cleanup
-    init_data.py    Test data initialization
+    init_data.py    Test data generation
 ```
 
 ## Requirements
 
 - Python 3.9+
-- `boto3` (only external dependency)
-- SSH access to workers (for distributed mode)
-
-## License
-
-MIT
+- `boto3`
+- SSH access to workers (distributed mode)

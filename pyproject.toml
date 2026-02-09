@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "s3loadtest"
-version = "3.0.0"
-description = "Modular S3 load testing framework with realistic workload patterns"
+version = "4.0.0"
+description = "S3 object store stress testing — maximized by default"
 requires-python = ">=3.9"
 dependencies = [
     "boto3>=1.26",
@@ -14,5 +14,6 @@ dependencies = [
 [project.scripts]
 s3loadtest = "s3loadtest.__main__:main"
 
-[tool.setuptools.packages.find]
-include = ["s3loadtest*"]
+[tool.setuptools]
+package-dir = {"s3loadtest" = "."}
+packages = ["s3loadtest", "s3loadtest.cli", "s3loadtest.tests"]
