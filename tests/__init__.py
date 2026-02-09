@@ -8,7 +8,9 @@ from s3loadtest.tests.checkpoint import CheckpointLoadTest
 from s3loadtest.tests.heavyread import HeavyReadTest
 from s3loadtest.tests.delete import DeleteLoadTest
 from s3loadtest.tests.elephant import ElephantFlowTest
+from s3loadtest.tests.firehose import FirehoseTest
 from s3loadtest.tests.listops import ListOpsTest
+from s3loadtest.tests.metastorm import MetastormTest
 
 TEST_CLASSES: dict[str, type] = {
     "baseload": BaseLoadTest,
@@ -16,7 +18,9 @@ TEST_CLASSES: dict[str, type] = {
     "heavyread": HeavyReadTest,
     "delete": DeleteLoadTest,
     "elephant": ElephantFlowTest,
+    "firehose": FirehoseTest,
     "listops": ListOpsTest,
+    "metastorm": MetastormTest,
     "spiky": SpikyBaseLoadTest,
 }
 
@@ -28,5 +32,7 @@ __all__ = [
     "HeavyReadTest",
     "DeleteLoadTest",
     "ElephantFlowTest",
+    "FirehoseTest",
     "ListOpsTest",
+    "MetastormTest",
 ]
